@@ -1,11 +1,13 @@
 import React from 'react';
+import { RefreshCw } from 'lucide-react';
 import { InputFieldProps } from '../types';
 
 const InputField: React.FC<InputFieldProps> = ({ 
   label, 
   value, 
   onChange, 
-  onFocus, 
+  onFocus,
+  onSync,
   prefix, 
   suffix, 
   placeholder,
@@ -47,11 +49,22 @@ const InputField: React.FC<InputFieldProps> = ({
             ${active ? 'text-white' : 'text-gray-300'}
             ${!prefix && 'pl-4'}
             ${!suffix && 'pr-4'}
+            ${onSync ? 'pr-10' : ''}
           `}
           step="any"
         />
 
-        {suffix && (
+        {onSync && (
+          <button 
+            onClick={onSync}
+            className="absolute right-2 p-1.5 rounded-md text-gray-500 hover:text-blue-400 hover:bg-blue-500/10 transition-all"
+            title="Sync with Live Price"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+          </button>
+        )}
+
+        {!onSync && suffix && (
           <div className="pr-4 pl-2 text-xs font-bold text-gray-600 uppercase tracking-wider">
             {suffix}
           </div>

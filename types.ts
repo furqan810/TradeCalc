@@ -1,6 +1,7 @@
 export type CalculationMode = 'investment' | 'quantity';
 
 export interface TradeState {
+  ticker: string;
   buyPrice: number;
   sellPrice: number;
   stopLossPrice: number;
@@ -20,6 +21,7 @@ export interface InputFieldProps {
   value: number | string;
   onChange: (value: string) => void;
   onFocus?: () => void;
+  onSync?: () => void;
   prefix?: string;
   suffix?: string;
   placeholder?: string;

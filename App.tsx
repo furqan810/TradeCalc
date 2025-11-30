@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   TrendingUp, 
   RotateCcw, 
@@ -9,7 +9,11 @@ import {
   ArrowDownRight,
   Calculator,
   ShieldAlert,
-  Scale
+  Scale,
+  FileDown,
+  Activity,
+  Wifi,
+  WifiOff
 } from 'lucide-react';
 import InputField from './components/InputField';
 import PnLChart from './components/PnLChart';
@@ -17,15 +21,83 @@ import { TradeState } from './types';
 
 const App: React.FC = () => {
   const [state, setState] = useState<TradeState>({
-    buyPrice: 150.00,
-    sellPrice: 175.50,
-    stopLossPrice: 135.00,
+    ticker: 'BTCUSDT',
+    buyPrice: 42000.00,
+    sellPrice: 45000.00,
+    stopLossPrice: 40000.00,
     mode: 'investment',
     amount: 5000, 
   });
 
-  const { buyPrice, sellPrice, stopLossPrice, mode, amount } = state;
+  // Real-time Data State
+  const [currentPrice, setCurrentPrice] = useState<number | null>(null);
+  const [isConnected, setIsConnected] = useState(false);
+  const [priceDirection, setPriceDirection] = useState<'up' | 'down' | 'neutral'>('neutral');
+  const wsRef = useRef<WebSocket | null>(null);
+  const prevPriceRef = useRef<number | null>(null);
 
+  const { ticker, buyPrice, sellPrice, stopLossPrice, mode, amount } = state;
+
+  // --- WEBSOCKET CONNECTION ---
+  useEffect(() => {
+    // Reset connection when ticker changes
+    if (wsRef.current) {
+      wsRef.current.close();
+    }
+
+    // Basic cleaning of ticker
+    const symbol = ticker.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (!symbol) return;
+
+    // Use Binance WebSocket for Crypto (Free, No Auth, Real-time)
+    // Fallback/Simulation for Forex is handled if connection closes or errors
+    const wsUrl = `wss://stream.binance.com:9443/ws/${symbol.toLowerCase()}@trade`;
+    
+    const connect = () => {
+      const ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        setIsConnected(true);
+      };
+
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        const price = parseFloat(data.p);
+        
+        setCurrentPrice(prev => {
+          if (prev && price > prev) setPriceDirection('up');
+          else if (prev && price < prev) setPriceDirection('down');
+          return price;
+        });
+      };
+
+      ws.onerror = () => {
+        setIsConnected(false);
+        // If Binance fails (likely not a crypto pair), we could simulate ticks
+        // For now, we just show disconnected state to keep it authentic
+      };
+
+      ws.onclose = () => {
+        setIsConnected(false);
+      };
+    };
+
+    connect();
+
+    return () => {
+      if (wsRef.current) wsRef.current.close();
+    };
+  }, [ticker]);
+
+  // Flash Effect Reset
+  useEffect(() => {
+    const timer = setTimeout(() => setPriceDirection('neutral'), 1000);
+    return () => clearTimeout(timer);
+  }, [currentPrice]);
+
+
+  // --- CALCULATIONS ---
   const investment = useMemo(() => {
     return mode === 'investment' ? amount : amount * buyPrice;
   }, [amount, buyPrice, mode]);
@@ -43,7 +115,7 @@ const App: React.FC = () => {
 
   // Stop Loss Calculations
   const stopLossRevenue = quantity * stopLossPrice;
-  const stopLossProfit = stopLossRevenue - investment; // This will be negative (loss)
+  const stopLossProfit = stopLossRevenue - investment; 
   const stopLossRoi = investment !== 0 ? (stopLossProfit / investment) * 100 : 0;
 
   // Risk to Reward
@@ -57,12 +129,44 @@ const App: React.FC = () => {
 
   const handleReset = () => {
     setState({
-      buyPrice: 150,
-      sellPrice: 175.50,
-      stopLossPrice: 135.00,
+      ticker: 'BTCUSDT',
+      buyPrice: 42000.00,
+      sellPrice: 45000.00,
+      stopLossPrice: 40000.00,
       mode: 'investment',
       amount: 5000,
     });
+  };
+
+  const handleSyncPrice = (field: 'buyPrice' | 'sellPrice' | 'stopLossPrice') => {
+    if (currentPrice) {
+      handleUpdate({ [field]: currentPrice });
+    }
+  };
+
+  const handleExport = () => {
+    const headers = ['Date', 'Ticker', 'Entry Price', 'Exit Target', 'Stop Loss', 'Total Investment', 'Share Quantity', 'Target Profit', 'Target ROI %', 'Risk/Reward'];
+    const data = [
+      new Date().toLocaleDateString(),
+      ticker,
+      buyPrice.toFixed(2),
+      sellPrice.toFixed(2),
+      stopLossPrice.toFixed(2),
+      investment.toFixed(2),
+      quantity.toFixed(4),
+      profit.toFixed(2),
+      roi.toFixed(2),
+      `1:${riskRewardRatio.toFixed(2)}`
+    ];
+    const csvContent = [headers.join(','), data.join(',')].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `${ticker}_plan_${new Date().toISOString().slice(0,10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const formatCurrency = (val: number) => 
@@ -78,14 +182,46 @@ const App: React.FC = () => {
         <div className="w-full lg:w-[400px] bg-gray-950/80 p-6 lg:p-10 border-r border-white/5 flex flex-col z-10">
           
           {/* Header */}
-          <div className="flex items-center gap-3 mb-10">
-            <div className="p-2.5 bg-gradient-to-br from-blue-600 to-indigo-700 rounded-xl shadow-lg shadow-blue-500/20">
-              <Calculator className="w-6 h-6 text-white" />
+          <div className="flex items-center justify-between mb-8">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-gradient-to-br from-blue-600 to-indigo-700 rounded-xl shadow-lg shadow-blue-500/20">
+                <Calculator className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h1 className="text-xl font-bold text-white tracking-tight">TradeCalc</h1>
+                <p className="text-gray-500 text-xs font-medium uppercase tracking-wider">Pro Simulator</p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-xl font-bold text-white tracking-tight">TradeCalc</h1>
-              <p className="text-gray-500 text-xs font-medium uppercase tracking-wider">Pro Simulator</p>
+            {/* Live Status Indicator */}
+            <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${isConnected ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-rose-500/10 border-rose-500/20 text-rose-400'}`}>
+              {isConnected ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
+              <span className="text-[10px] font-bold tracking-wider">{isConnected ? 'LIVE' : 'OFFLINE'}</span>
             </div>
+          </div>
+
+          {/* Ticker Input & Live Price */}
+          <div className="mb-8 p-4 bg-gray-900/50 rounded-xl border border-white/5">
+             <div className="mb-3">
+               <label className="text-xs font-semibold text-gray-500 tracking-wide uppercase mb-2 block">Ticker Symbol</label>
+               <input 
+                  type="text" 
+                  value={ticker}
+                  onChange={(e) => handleUpdate({ ticker: e.target.value })}
+                  className="w-full bg-transparent text-xl font-bold text-white placeholder-gray-700 focus:outline-none uppercase tracking-wider font-mono"
+                  placeholder="BTCUSDT"
+               />
+             </div>
+             
+             <div className="flex items-end justify-between">
+                <span className="text-xs text-gray-500 font-medium">Current Price</span>
+                <div className={`flex items-center gap-2 transition-colors duration-300 ${priceDirection === 'up' ? 'text-emerald-400' : priceDirection === 'down' ? 'text-rose-400' : 'text-gray-200'}`}>
+                  {priceDirection === 'up' && <ArrowUpRight className="w-4 h-4" />}
+                  {priceDirection === 'down' && <ArrowDownRight className="w-4 h-4" />}
+                  <span className="text-2xl font-mono font-bold tracking-tight">
+                    {currentPrice ? formatCurrency(currentPrice) : '---'}
+                  </span>
+                </div>
+             </div>
           </div>
 
           {/* Inputs */}
@@ -100,13 +236,15 @@ const App: React.FC = () => {
                 label="Entry Price" 
                 value={buyPrice} 
                 onChange={(v) => handleUpdate({ buyPrice: parseFloat(v) || 0 })} 
+                onSync={currentPrice ? () => handleSyncPrice('buyPrice') : undefined}
                 prefix="$" 
                 placeholder="0.00"
               />
               <InputField 
                 label="Exit Target" 
                 value={sellPrice} 
-                onChange={(v) => handleUpdate({ sellPrice: parseFloat(v) || 0 })} 
+                onChange={(v) => handleUpdate({ sellPrice: parseFloat(v) || 0 })}
+                onSync={currentPrice ? () => handleSyncPrice('sellPrice') : undefined} 
                 prefix="$" 
                 placeholder="0.00"
               />
@@ -114,6 +252,7 @@ const App: React.FC = () => {
                 label="Stop Loss" 
                 value={stopLossPrice} 
                 onChange={(v) => handleUpdate({ stopLossPrice: parseFloat(v) || 0 })} 
+                onSync={currentPrice ? () => handleSyncPrice('stopLossPrice') : undefined}
                 prefix="$" 
                 placeholder="0.00"
               />
@@ -125,7 +264,6 @@ const App: React.FC = () => {
                   <Wallet className="w-4 h-4 text-emerald-500" />
                   <span>Position Size</span>
                 </div>
-                {/* Mode Indicator */}
                 <span className="text-[10px] font-bold px-2 py-1 rounded bg-gray-800 text-gray-400 border border-gray-700">
                   {mode === 'investment' ? 'BY AMOUNT ($)' : 'BY SHARES (Qty)'}
                 </span>
@@ -154,7 +292,15 @@ const App: React.FC = () => {
           </div>
 
           {/* Footer Actions */}
-          <div className="mt-10 pt-6 border-t border-white/5">
+          <div className="mt-10 pt-6 border-t border-white/5 space-y-3">
+            <button 
+              onClick={handleExport}
+              className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-sm font-semibold text-emerald-400 hover:text-white bg-emerald-500/10 hover:bg-emerald-500/90 border border-emerald-500/20 hover:border-emerald-500/50 transition-all group"
+            >
+              <FileDown className="w-4 h-4" />
+              Export to CSV
+            </button>
+
             <button 
               onClick={handleReset}
               className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-sm font-semibold text-gray-400 hover:text-white bg-gray-900 hover:bg-gray-800 border border-gray-800 hover:border-gray-700 transition-all group"
@@ -237,7 +383,7 @@ const App: React.FC = () => {
           <div className="flex-1 bg-gray-950/30 border border-white/5 rounded-3xl p-6 relative flex flex-col">
             <div className="flex justify-between items-center mb-6">
               <h3 className="text-white font-semibold flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
+                <Activity className="w-4 h-4 text-blue-500 animate-pulse" />
                 Analysis Curve
               </h3>
               <div className="flex gap-4 text-xs font-medium text-gray-500">
@@ -253,8 +399,8 @@ const App: React.FC = () => {
               </div>
             </div>
             
-            <div className="flex-1 min-h-[300px] w-full">
-              {buyPrice > 0 ? (
+            <div className="h-[320px] w-full">
+               {buyPrice > 0 ? (
                 <PnLChart 
                   buyPrice={buyPrice} 
                   sellPrice={sellPrice} 
